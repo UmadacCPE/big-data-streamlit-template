@@ -1,0 +1,7 @@
+streamlit
+pandas
+plotly
+pymongo
+kafka-python
+streamlit-autorefresh
+openpyxl
