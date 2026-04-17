@@ -1,11 +1,8 @@
-import os
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 from pymongo import MongoClient
 from datetime import datetime, timedelta, timezone
-import json
-
 from streamlit_autorefresh import st_autorefresh
 import base64
 from io import BytesIO
@@ -16,25 +13,25 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# --- Use Streamlit's native dark theme (set in .streamlit/config.toml or via UI) ---
+# No heavy custom CSS needed – Streamlit handles colors automatically.
+# Only minimal overrides for specific elements that may still appear off.
 st.markdown("""
-    <style>
-    /* Minimalist Modern Theme with Pastel Blue, Pastel Brown, White, and Black */
-    .main { padding: 2rem; }
-    .stApp { background-color: #ffffff; color: #333333; }
-    h1 { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 2rem; font-weight: 400; color: #333333; margin-bottom: 1rem; }
-    h2, h3 { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-weight: 400; color: #666666; }
-    .stMarkdown { font-size: 1rem; color: #333333; }
-    .stButton > button { background-color: #d2b48c; border: none; border-radius: 4px; padding: 0.5rem 1rem; font-weight: 500; color: #333333; transition: background-color 0.2s; }
-    .stButton > button:hover { background-color: #c2a47c; }
-    .stMetric { background-color: #ffffff; border-radius: 8px; padding: 1rem; border: 1px solid #000000; color: #333333; }
-    .stMetric > label { color: #666666 !important; }
-    .stSelectbox, .stMultiSelect { background-color: #ffffff; border-radius: 4px; border: 1px solid #000000; color: #333333; }
-    .stPlotlyChart { border-radius: 8px; }
-    .stDataFrame { background-color: #ffffff; border-radius: 8px; overflow: hidden; color: #333333; }
-    .stDataFrame td { background-color: #ffffff !important; color: #333333 !important; border-color: #000000 !important; }
-    .sidebar .sidebar-content { background-color: #b3d9ff; color: #333333; }
-    section[data-testid="stStatusWidget"] div { background-color: #f5f5f5; color: #333333; }
-    </style>
+<style>
+    /* Ensure metric labels and values are readable */
+    .stMetric label, .stMetric div[data-testid="stMetricValue"] {
+        color: inherit !important;
+    }
+    /* Sidebar text color */
+    section[data-testid="stSidebar"] * {
+        color: inherit;
+    }
+    /* Make plotly charts blend with dark background */
+    .stPlotlyChart {
+        background-color: transparent !important;
+    }
+</style>
 """, unsafe_allow_html=True)
 
 # --- Configuration ---
@@ -63,7 +60,7 @@ def get_historical(hours=24):
             df['timestamp'] = df['timestamp'].dt.tz_localize(None)
     return df
 
-@st.cache_data(ttl=10)
+@st.cache_data(ttl=5)
 def get_live_mongo_data(minutes=10):
     """Get live data: most recent records from MongoDB (last N minutes)."""
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
@@ -100,7 +97,7 @@ def export_data(df, fmt='csv'):
         with pd.ExcelWriter(output, engine='openpyxl') as w:
             export_df.to_excel(w, index=False)
         data = output.getvalue()
-        mime = 'application/vnd.openxmlformats-officerspreadsheetml.sheet'
+        mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         ext = 'xlsx'
     else:
         return None
@@ -120,9 +117,9 @@ if page == "Live Stream":
     st.session_state.live_df = df_live
 
     if not df_live.empty:
-        st.markdown(f'<div style="background: linear-gradient(135deg, #166534, #15803d); color: white; padding: 1rem; border-radius: 8px; text-align: center; font-weight: 500;">Live data active: {len(df_live)} records (last 10 min)</div>', unsafe_allow_html=True)
+        st.success(f"✅ Live data active: {len(df_live)} records (last 10 min)")
     else:
-        st.markdown('<div style="background: #7c2d12; color: #f8fafc; padding: 1rem; border-radius: 8px; text-align: center; font-weight: 500;">Awaiting data... Pipeline updates every 60s.</div>', unsafe_allow_html=True)
+        st.warning("⏳ Awaiting data... Pipeline updates every 60s.")
         st.info("World Bank data is annual; 'live' shows latest pipeline inserts.")
 
     if not df_live.empty:
@@ -131,18 +128,18 @@ if page == "Live Stream":
             st.markdown("**Filter Countries**")
             selected_countries = st.multiselect(
                 label="Countries",
-                options=sorted(st.session_state.live_df['country_name'].unique()),
-                default=sorted(st.session_state.live_df['country_name'].unique())[:3]
+                options=sorted(df_live['country_name'].unique()),
+                default=sorted(df_live['country_name'].unique())[:3]
             )
         with col2:
             st.markdown("**Filter Indicators**")
             selected_indicators = st.multiselect(
                 label="Indicators",
-                options=sorted(st.session_state.live_df['indicator_name'].unique()),
-                default=sorted(st.session_state.live_df['indicator_name'].unique())[:2]
+                options=sorted(df_live['indicator_name'].unique()),
+                default=sorted(df_live['indicator_name'].unique())[:2]
             )
 
-        df_filtered = st.session_state.live_df.copy()
+        df_filtered = df_live.copy()
         if selected_countries:
             df_filtered = df_filtered[df_filtered['country_name'].isin(selected_countries)]
         if selected_indicators:
@@ -171,9 +168,9 @@ if page == "Live Stream":
                 y='value',
                 color='indicator_name',
                 barmode='group',
-                title="Latest Indicator Values by Country"
+                title="Latest Indicator Values by Country",
+                template="plotly_dark"
             )
-            fig_bar.update_layout(template='plotly_white')
             st.plotly_chart(fig_bar, width="stretch")
 
         if df_live['timestamp'].nunique() > 1:
@@ -184,9 +181,9 @@ if page == "Live Stream":
                 y='value',
                 color='country_name',
                 line_dash='indicator_name',
-                title="Values Over Time"
+                title="Values Over Time",
+                template="plotly_dark"
             )
-            fig_line.update_layout(template='plotly_white')
             st.plotly_chart(fig_line, width="stretch")
 
         st.markdown("### Recent Records")
@@ -197,9 +194,7 @@ if page == "Live Stream":
 elif page == "Historical Analysis":
     st.markdown("# Historical Indicator Analysis")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        hours = st.slider("Data Range", 1, 168, 24)
+    hours = st.slider("Data Range (hours)", 1, 168, 24)
     df_hist = get_historical(hours)
 
     if not df_hist.empty:
@@ -209,14 +204,16 @@ elif page == "Historical Analysis":
             hist_countries = st.multiselect(
                 label="Countries",
                 options=sorted(df_hist['country_name'].unique()),
-                default=sorted(df_hist['country_name'].unique())[:5]
+                default=sorted(df_hist['country_name'].unique())[:5],
+                key="hist_countries"
             )
         with col2:
             st.markdown("**Indicators**")
             hist_indicators = st.multiselect(
                 label="Indicators",
                 options=sorted(df_hist['indicator_name'].unique()),
-                default=sorted(df_hist['indicator_name'].unique())[:2]
+                default=sorted(df_hist['indicator_name'].unique())[:2],
+                key="hist_indicators"
             )
 
         if hist_countries:
@@ -232,9 +229,9 @@ elif page == "Historical Analysis":
             y='value',
             color='country_name',
             line_dash='indicator_name',
-            title="Indicator Trends"
+            title="Indicator Trends",
+            template="plotly_dark"
         )
-        fig_hist.update_layout(template='plotly_white')
         st.plotly_chart(fig_hist, width="stretch")
 
         st.markdown("### Summary Statistics")
